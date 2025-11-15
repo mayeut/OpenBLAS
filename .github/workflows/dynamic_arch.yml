@@ -12,24 +12,26 @@ permissions:
 jobs:
   build:
     if: "github.repository == 'OpenMathLib/OpenBLAS' || github.event_name == 'workflow_dispatch'"
-    runs-on: ${{ matrix.os }}
+    name: "${{ matrix.os }}, ${{ matrix.cc }}, ${{ matrix.fortran }}, ${{ matrix.build }}"
+    runs-on: ${{ matrix.runner }}
 
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, ubuntu-24.04-arm]
+        os: [linux-x64, linux-aarch64]
         cc: [gcc, clang, clang-21]
-        fortran: [gfortran, flang]
+        fortran: [gfortran, flang, flang-21]
         build: [cmake, make]
+        include:
+          - {os: linux-x64, runner: ubuntu-latest}
+          - {os: linux-aarch64, runner: ubuntu-24.04-arm}
+          - {os: macos-arm64, cc: clang, fortran: gfortran, build: cmake, runner: macos-latest}
+          - {os: macos-latest, cc: clang, fortran: gfortran, build: make, runner: macos-latest}
         exclude:
-          - os: macos-latest
-            cc: gcc
-          - os: macos-latest
-            cc: clang-21
-          - os: macos-latest
+          - os: linux-aarch64
             fortran: flang
-          - os: ubuntu-24.04-arm
-            fortran: flang
+          - fortran: flang-21
+            cc: clang
 
     steps:
       - name: Checkout repository
@@ -55,12 +57,15 @@ jobs:
           EOF
             sudo apt-get update
             sudo apt-get install -y ccache
-            if [ "${{ matrix.cc }}" == "clang-21" ]; then
+            if [ "${{ matrix.cc }}" == "clang-21" ] || [ "${{ matrix.fortran }}" == "flang-21" ]; then
                 wget https://apt.llvm.org/llvm.sh
                 chmod +x llvm.sh
                 sudo ./llvm.sh 21
+                sudo apt-get install -y libclang-rt-21-dev
             fi
             if [ "${{ matrix.fortran }}" == "flang" ]; then
+              # download and install classic flang
+              curl -fsSL https://github.com/flang-compiler/flang/releases/download/flang_20190329/flang-20190329-x86-70.tgz | sudo tar -C /usr -xz
               wget http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
               sudo apt install ./libtinfo5_6.3-2ubuntu0.1_amd64.deb
             else
@@ -120,14 +125,6 @@ jobs:
 
       - name: Build OpenBLAS
         run: |
-          if [ "${{ matrix.fortran }}" = "flang" ]; then
-            # download and install classic flang
-            cd /usr/
-            sudo wget -nv https://github.com/flang-compiler/flang/releases/download/flang_20190329/flang-20190329-x86-70.tgz
-            sudo tar xf flang-20190329-x86-70.tgz
-            sudo rm flang-20190329-x86-70.tgz
-            cd -
-          fi
           case "${{ matrix.build }}" in
             "make")
               make -j$(nproc) DYNAMIC_ARCH=1 USE_OPENMP=0 CC="ccache ${{ matrix.cc }}" FC="ccache ${{ matrix.fortran }}"
